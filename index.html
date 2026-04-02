@@ -90,6 +90,7 @@
     <button class="shape-btn" data-shape="icosa">Icosahedron</button>
     <button class="shape-btn" data-shape="octahedron">Octahedron</button>
     <button class="shape-btn" data-shape="dodecahedron">Dodecahedron</button>
+    <button class="shape-btn" data-shape="cuboctahedron">Cuboctahedron</button>
   </div>
 </div>
 
@@ -141,6 +142,56 @@
     icosa:        () => new THREE.IcosahedronGeometry(1.6, 0),
     octahedron:   () => new THREE.OctahedronGeometry(1.6, 0),
     dodecahedron: () => new THREE.DodecahedronGeometry(1.6, 0),
+    cuboctahedron: () => {
+      const s = 1.6;
+      // 12 vertices: midpoints of cube edges
+      const v = [
+        [1,1,0],[-1,1,0],[-1,-1,0],[1,-1,0],  // xy plane
+        [1,0,1],[-1,0,1],[-1,0,-1],[1,0,-1],    // xz plane
+        [0,1,1],[0,-1,1],[0,-1,-1],[0,1,-1]      // yz plane
+      ];
+      const faces = [
+        // 8 triangles
+        [0,4,8],[1,8,5],[2,5,9],[3,9,4],
+        [0,11,7],[1,6,11],[2,10,6],[3,7,10],
+        // 6 squares (split into 2 triangles each)
+        [0,8,1,11],[4,9,5,8],[5,9,2,6],
+        [3,10,7,0],[4,0,7,3],[1,5,2,6] // wrong, let me redo
+      ];
+      // Better approach: use indexed buffer geometry
+      const geom = new THREE.BufferGeometry();
+      const positions = [];
+      const normals = [];
+      function addTri(a, b, c) {
+        const va = v[a].map(x=>x*s), vb = v[b].map(x=>x*s), vc = v[c].map(x=>x*s);
+        const ab = [vb[0]-va[0],vb[1]-va[1],vb[2]-va[2]];
+        const ac = [vc[0]-va[0],vc[1]-va[1],vc[2]-va[2]];
+        const n = [ab[1]*ac[2]-ab[2]*ac[1], ab[2]*ac[0]-ab[0]*ac[2], ab[0]*ac[1]-ab[1]*ac[0]];
+        const len = Math.sqrt(n[0]*n[0]+n[1]*n[1]+n[2]*n[2]);
+        n[0]/=len; n[1]/=len; n[2]/=len;
+        positions.push(...va,...vb,...vc);
+        normals.push(...n,...n,...n);
+      }
+      // 8 triangular faces
+      addTri(0,8,4); addTri(1,5,8); addTri(2,9,5); addTri(3,4,9);
+      addTri(0,7,11); addTri(1,11,6); addTri(2,6,10); addTri(3,10,7);
+      // 6 square faces (each split into 2 triangles)
+      // top: 0,8,1,11
+      addTri(0,8,1); addTri(0,1,11);
+      // bottom: 3,9,2,10
+      addTri(3,9,2); addTri(3,2,10);
+      // front: 4,8,5,9
+      addTri(4,8,5); addTri(4,5,9);
+      // back: 7,11,6,10
+      addTri(7,10,6); addTri(7,6,11);
+      // right: 0,4,3,7
+      addTri(0,4,3); addTri(0,3,7);
+      // left: 1,5,2,6
+      addTri(1,6,2); addTri(1,2,5);
+      geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geom.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+      return geom;
+    },
   };
 
   const material = new THREE.MeshPhongMaterial({
