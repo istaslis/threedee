@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="3D Shapes">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='90' fill='%230a0a1a'/><polygon points='256,80 420,200 380,380 132,380 92,200' fill='none' stroke='%2300d4ff' stroke-width='12'/><circle cx='256' cy='256' r='80' fill='none' stroke='%23ff6b9d' stroke-width='10'/></svg>">
+<title>3D Shapes</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a1a; font-family: -apple-system, system-ui, sans-serif; touch-action: none; -webkit-user-select: none; user-select: none; }
+  canvas { display: block; }
+
+  #ui {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
+    z-index: 10;
+  }
+
+  #shape-bar {
+    display: flex; gap: 8px; overflow-x: auto; padding: 4px 0;
+    scrollbar-width: none; -ms-overflow-style: none;
+    justify-content: center; flex-wrap: wrap;
+  }
+  #shape-bar::-webkit-scrollbar { display: none; }
+
+  .shape-btn {
+    flex-shrink: 0; padding: 10px 18px; border-radius: 24px;
+    border: 1.5px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.7); font-size: 14px; font-weight: 500;
+    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    cursor: pointer; transition: all 0.2s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .shape-btn.active {
+    background: rgba(0,212,255,0.15); border-color: #00d4ff;
+    color: #00d4ff; box-shadow: 0 0 20px rgba(0,212,255,0.2);
+  }
+
+  #info {
+    position: fixed; top: env(safe-area-inset-top, 16px); left: 0; right: 0;
+    text-align: center; color: rgba(255,255,255,0.35); font-size: 12px;
+    padding-top: 12px; pointer-events: none;
+  }
+
+  #wireframe-toggle {
+    position: fixed; top: env(safe-area-inset-top, 16px); right: 16px;
+    padding: 8px 14px; border-radius: 20px;
+    border: 1.5px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.7); font-size: 13px; font-weight: 500;
+    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    cursor: pointer; z-index: 10; margin-top: 8px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #wireframe-toggle.active {
+    background: rgba(255,107,157,0.15); border-color: #ff6b9d; color: #ff6b9d;
+  }
+
+  #auto-toggle {
+    position: fixed; top: env(safe-area-inset-top, 16px); left: 16px;
+    padding: 8px 14px; border-radius: 20px;
+    border: 1.5px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.7); font-size: 13px; font-weight: 500;
+    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    cursor: pointer; z-index: 10; margin-top: 8px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #auto-toggle.active {
+    background: rgba(120,255,120,0.15); border-color: #78ff78; color: #78ff78;
+  }
+</style>
+</head>
+<body>
+
+<div id="info">Drag to rotate &middot; Pinch to zoom</div>
+<button id="auto-toggle" class="active">Auto</button>
+<button id="wireframe-toggle">Wire</button>
+
+<div id="ui">
+  <div id="shape-bar">
+    <button class="shape-btn active" data-shape="cube">Cube</button>
+    <button class="shape-btn" data-shape="sphere">Sphere</button>
+    <button class="shape-btn" data-shape="torus">Torus</button>
+    <button class="shape-btn" data-shape="cylinder">Cylinder</button>
+    <button class="shape-btn" data-shape="cone">Cone</button>
+    <button class="shape-btn" data-shape="knot">Knot</button>
+    <button class="shape-btn" data-shape="icosa">Icosahedron</button>
+    <button class="shape-btn" data-shape="octahedron">Octahedron</button>
+    <button class="shape-btn" data-shape="dodecahedron">Dodecahedron</button>
+  </div>
+</div>
+
+<script src="three.min.js"></script>
+<script>
+(function() {
+  // --- Service Worker for offline caching ---
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').then(
+      () => console.log('SW registered'),
+      err => console.log('SW failed:', err)
+    );
+  }
+
+  // --- Scene Setup ---
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 100);
+  camera.position.z = 5;
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setClearColor(0x0a0a1a);
+  document.body.prepend(renderer.domElement);
+
+  // --- Lighting ---
+  scene.add(new THREE.AmbientLight(0x404060, 0.6));
+
+  const dir1 = new THREE.DirectionalLight(0x00d4ff, 0.8);
+  dir1.position.set(3, 4, 5);
+  scene.add(dir1);
+
+  const dir2 = new THREE.DirectionalLight(0xff6b9d, 0.5);
+  dir2.position.set(-3, -2, 3);
+  scene.add(dir2);
+
+  const dir3 = new THREE.DirectionalLight(0xffd700, 0.3);
+  dir3.position.set(0, -4, -3);
+  scene.add(dir3);
+
+  // --- Shapes ---
+  const geometries = {
+    cube:         () => new THREE.BoxGeometry(2, 2, 2, 4, 4, 4),
+    sphere:       () => new THREE.SphereGeometry(1.5, 48, 48),
+    torus:        () => new THREE.TorusGeometry(1.2, 0.5, 32, 64),
+    cylinder:     () => new THREE.CylinderGeometry(1, 1, 2.5, 48, 4),
+    cone:         () => new THREE.ConeGeometry(1.2, 2.5, 48, 4),
+    knot:         () => new THREE.TorusKnotGeometry(1, 0.35, 128, 32),
+    icosa:        () => new THREE.IcosahedronGeometry(1.6, 0),
+    octahedron:   () => new THREE.OctahedronGeometry(1.6, 0),
+    dodecahedron: () => new THREE.DodecahedronGeometry(1.6, 0),
+  };
+
+  const material = new THREE.MeshPhongMaterial({
+    color: 0x4488ff,
+    specular: 0x222244,
+    shininess: 60,
+    flatShading: false,
+  });
+
+  const wireMaterial = new THREE.MeshPhongMaterial({
+    color: 0x00d4ff,
+    wireframe: true,
+  });
+
+  let currentShape = 'cube';
+  let wireframe = false;
+  let autoRotate = true;
+  let mesh = new THREE.Mesh(geometries[currentShape](), material);
+  scene.add(mesh);
+
+  function setShape(name) {
+    currentShape = name;
+    scene.remove(mesh);
+    mesh.geometry.dispose();
+    const geom = geometries[name]();
+    mesh = new THREE.Mesh(geom, wireframe ? wireMaterial : material);
+    scene.add(mesh);
+    // Reset rotation smoothly
+    targetRotX = mesh.rotation.x;
+    targetRotY = mesh.rotation.y;
+  }
+
+  // --- Shape buttons ---
+  document.querySelectorAll('.shape-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelector('.shape-btn.active').classList.remove('active');
+      btn.classList.add('active');
+      setShape(btn.dataset.shape);
+    });
+  });
+
+  // --- Wireframe toggle ---
+  const wireBtn = document.getElementById('wireframe-toggle');
+  wireBtn.addEventListener('click', () => {
+    wireframe = !wireframe;
+    wireBtn.classList.toggle('active', wireframe);
+    mesh.material = wireframe ? wireMaterial : material;
+  });
+
+  // --- Auto-rotate toggle ---
+  const autoBtn = document.getElementById('auto-toggle');
+  autoBtn.addEventListener('click', () => {
+    autoRotate = !autoRotate;
+    autoBtn.classList.toggle('active', autoRotate);
+  });
+
+  // --- Touch / Mouse Controls ---
+  let isDragging = false;
+  let prevX = 0, prevY = 0;
+  let rotX = 0.3, rotY = 0.5;
+  let targetRotX = 0.3, targetRotY = 0.5;
+  let zoom = 5, targetZoom = 5;
+  let pinchDist = 0;
+  let autoRotOffset = 0;
+
+  const canvas = renderer.domElement;
+
+  canvas.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'touch' && e.isPrimary === false) return;
+    isDragging = true;
+    prevX = e.clientX;
+    prevY = e.clientY;
+  });
+
+  canvas.addEventListener('pointermove', e => {
+    if (!isDragging) return;
+    const dx = e.clientX - prevX;
+    const dy = e.clientY - prevY;
+    targetRotY += dx * 0.008;
+    targetRotX += dy * 0.008;
+    targetRotX = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, targetRotX));
+    prevX = e.clientX;
+    prevY = e.clientY;
+  });
+
+  canvas.addEventListener('pointerup', () => { isDragging = false; });
+  canvas.addEventListener('pointercancel', () => { isDragging = false; });
+
+  // Pinch zoom
+  const touches = new Map();
+  canvas.addEventListener('touchstart', e => {
+    for (const t of e.changedTouches) touches.set(t.identifier, t);
+    if (touches.size === 2) {
+      const [a, b] = [...touches.values()];
+      pinchDist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    }
+  }, { passive: true });
+
+  canvas.addEventListener('touchmove', e => {
+    for (const t of e.changedTouches) touches.set(t.identifier, t);
+    if (touches.size === 2) {
+      const [a, b] = [...touches.values()];
+      const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      const delta = dist - pinchDist;
+      targetZoom -= delta * 0.015;
+      targetZoom = Math.max(2, Math.min(12, targetZoom));
+      pinchDist = dist;
+    }
+  }, { passive: true });
+
+  canvas.addEventListener('touchend', e => {
+    for (const t of e.changedTouches) touches.delete(t.identifier);
+  });
+
+  // Mouse wheel zoom
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    targetZoom += e.deltaY * 0.005;
+    targetZoom = Math.max(2, Math.min(12, targetZoom));
+  }, { passive: false });
+
+  // --- Resize ---
+  window.addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+
+  // --- Stars background ---
+  const starGeom = new THREE.BufferGeometry();
+  const starCount = 600;
+  const starPos = new Float32Array(starCount * 3);
+  for (let i = 0; i < starCount * 3; i++) {
+    starPos[i] = (Math.random() - 0.5) * 50;
+  }
+  starGeom.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+  const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.05, transparent: true, opacity: 0.6 });
+  scene.add(new THREE.Points(starGeom, starMat));
+
+  // --- Animate ---
+  function animate() {
+    requestAnimationFrame(animate);
+
+    // Smooth interpolation
+    rotX += (targetRotX - rotX) * 0.1;
+    rotY += (targetRotY - rotY) * 0.1;
+    zoom += (targetZoom - zoom) * 0.1;
+
+    camera.position.z = zoom;
+
+    if (autoRotate && !isDragging) {
+      autoRotOffset += 0.005;
+    }
+
+    mesh.rotation.x = rotX;
+    mesh.rotation.y = rotY + autoRotOffset;
+
+    renderer.render(scene, camera);
+  }
+
+  animate();
+})();
+</script>
+</body>
+</html>
