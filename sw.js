@@ -1,9 +1,11 @@
-const CACHE_NAME = '3d-shapes-v2';
+const CACHE_NAME = '3d-shapes-v3';
 const ASSETS = [
   './',
   './index.html',
   './manifest.json',
-  './three.min.js'
+  './three.min.js',
+  './icon-192.png',
+  './icon-512.png'
 ];
 
 self.addEventListener('install', e => {
